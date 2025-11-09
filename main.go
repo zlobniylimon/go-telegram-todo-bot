@@ -155,7 +155,7 @@ func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message != nil {
 		var chatData ChatData
 		getValue(ctx, redisClient, strconv.Itoa(int(update.Message.Chat.ID)), &chatData)
-		if chatData.MessageID != 0 {
+		if chatData.MessageID != 0 && chatData.MessageThreadID == update.Message.MessageThreadID {
 			chatData.Items = parseShoppingList(chatData.Items, update.Message.Text)
 			b.DeleteMessage(ctx, &bot.DeleteMessageParams{
 				ChatID:    update.Message.Chat.ID,
