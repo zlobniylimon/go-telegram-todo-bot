@@ -20,8 +20,8 @@ services:
   redis:
     image: redis
     container_name: gotelegramtodo-redis
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-your_secure_password}
     volumes:
