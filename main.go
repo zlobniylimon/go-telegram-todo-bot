@@ -13,13 +13,15 @@ import (
 
 type Item struct {
 	Name   string `json:"name"`
-	Bought bool   `json:"bought"`
+	Enable bool   `json:"enable"`
 }
 
-type ChatData struct {
+type ChatListData struct {
 	Items           []Item `json:"items"`
 	MessageID       int    `json:"message_id"`
 	MessageThreadID int    `json:"message_thread_id"`
+	ChatID          int64  `json:"chat_id"`
+	Locked          bool   `json:"locked"`
 }
 
 func main() {
@@ -43,18 +45,26 @@ func main() {
 	b.Start(ctx)
 }
 
+func generateChatKey(message *models.Message) string {
+	return strconv.Itoa(int(message.Chat.ID)) + ":" + strconv.Itoa(int(message.MessageThreadID))
+}
+
 func makeListCommand(ctx context.Context, b *bot.Bot, update *models.Update) {
-	var chatData ChatData
+	var chatListData ChatListData
 	message, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
-		Text:            "ToDo List",
-		ReplyMarkup:     formatItemsIntoButton(chatData.Items),
+		Text:            "🗒",
+		ReplyMarkup:     formatListDataButton(&chatListData),
 	})
-	chatData.MessageID = message.ID
-	chatData.MessageThreadID = message.MessageThreadID
-
-	setValue(ctx, redisClient, strconv.Itoa(int(update.Message.Chat.ID)), chatData)
+	chatListData.MessageID = message.ID
+	chatListData.MessageThreadID = message.MessageThreadID
+	chatListData.ChatID = message.Chat.ID
+	b.DeleteMessage(ctx, &bot.DeleteMessageParams{
+		ChatID:    update.Message.Chat.ID,
+		MessageID: update.Message.ID,
+	})
+	setValue(ctx, redisClient, generateChatKey(update.Message), chatListData)
 }
 
 func callbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
@@ -63,68 +73,80 @@ func callbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 		ShowAlert:       false,
 	})
 
-	var chatData ChatData
-	getValue(ctx, redisClient, strconv.Itoa(int(update.CallbackQuery.Message.Message.Chat.ID)), &chatData)
+	var chatListData ChatListData
+	getValue(ctx, redisClient, generateChatKey(update.CallbackQuery.Message.Message), &chatListData)
 
 	if strings.HasPrefix(update.CallbackQuery.Data, "btn_item") {
 		tokens := strings.Split(update.CallbackQuery.Data, "_")
 		index, _ := strconv.Atoi(tokens[len(tokens)-1])
-		chatData.Items[index].Bought = !chatData.Items[index].Bought
+		chatListData.Items[index].Enable = !chatListData.Items[index].Enable
 	}
 
 	switch update.CallbackQuery.Data {
 	case "btn_empty_list":
 		{
-			chatData.Items = nil
+			chatListData.Items = nil
 		}
 	case "btn_refresh_list":
 		{
 			var newList []Item
-			for _, item := range chatData.Items {
-				if !item.Bought {
+			for _, item := range chatListData.Items {
+				if !item.Enable {
 					newList = append(newList, item)
 				}
 			}
-			chatData.Items = newList
+			chatListData.Items = newList
 		}
+	case "btn_list_locked":
+		{
+			chatListData.Locked = !chatListData.Locked
+		}
+
 	}
-	setValue(ctx, redisClient, strconv.Itoa(int(update.CallbackQuery.Message.Message.Chat.ID)), chatData)
+	setValue(ctx, redisClient, generateChatKey(update.CallbackQuery.Message.Message), chatListData)
 	b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
 		ChatID:      update.CallbackQuery.Message.Message.Chat.ID,
 		MessageID:   update.CallbackQuery.Message.Message.ID,
-		ReplyMarkup: formatItemsIntoButton(chatData.Items),
+		ReplyMarkup: formatListDataButton(&chatListData),
 	})
 }
 
 func buttonText(item Item) string {
-	if item.Bought {
+	if item.Enable {
 		return "✅ " + item.Name
 	}
 
 	return "❌ " + item.Name
 }
 
-func drawShoppingList(ctx context.Context, b *bot.Bot, chatID int64, messageThreadID int, chatData *ChatData) {
-	if chatData.MessageID == 0 {
+func lockedImage(chatListData *ChatListData) string {
+	if chatListData.Locked {
+		return "🔒"
+	}
+	return "🔓"
+}
+
+func drawShoppingList(ctx context.Context, b *bot.Bot, chatID int64, messageThreadID int, chatListData *ChatListData) {
+	if chatListData.MessageID == 0 {
 		message, _ := b.SendMessage(ctx, &bot.SendMessageParams{
 			ChatID:          chatID,
 			MessageThreadID: messageThreadID,
-			Text:            "ToDo List",
-			ReplyMarkup:     formatItemsIntoButton(chatData.Items),
+			Text:            "🗒",
+			ReplyMarkup:     formatListDataButton(chatListData),
 		})
-		chatData.MessageID = message.ID
+		chatListData.MessageID = message.ID
 	} else {
 		b.EditMessageReplyMarkup(ctx, &bot.EditMessageReplyMarkupParams{
 			ChatID:      chatID,
-			MessageID:   chatData.MessageID,
-			ReplyMarkup: formatItemsIntoButton(chatData.Items),
+			MessageID:   chatListData.MessageID,
+			ReplyMarkup: formatListDataButton(chatListData),
 		})
 	}
 }
 
-func formatItemsIntoButton(items []Item) models.ReplyMarkup {
+func formatListDataButton(chatListData *ChatListData) models.ReplyMarkup {
 	var keyboard [][]models.InlineKeyboardButton
-	for item_index, item := range items {
+	for item_index, item := range chatListData.Items {
 		keyboard = append(keyboard, []models.InlineKeyboardButton{
 			{
 				Text:         buttonText(item),
@@ -135,12 +157,19 @@ func formatItemsIntoButton(items []Item) models.ReplyMarkup {
 
 	keyboard = append(keyboard, []models.InlineKeyboardButton{
 		{
-			Text:         "empty list",
+			Text:         "🗑",
 			CallbackData: "btn_empty_list",
 		},
 		{
-			Text:         "refresh list",
+			Text:         "🔄",
 			CallbackData: "btn_refresh_list",
+		},
+	})
+
+	keyboard = append(keyboard, []models.InlineKeyboardButton{
+		{
+			Text:         lockedImage(chatListData),
+			CallbackData: "btn_list_locked",
 		},
 	})
 
@@ -153,26 +182,25 @@ func formatItemsIntoButton(items []Item) models.ReplyMarkup {
 
 func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message != nil {
-		var chatData ChatData
-		getValue(ctx, redisClient, strconv.Itoa(int(update.Message.Chat.ID)), &chatData)
-		if chatData.MessageID != 0 && chatData.MessageThreadID == update.Message.MessageThreadID {
-			chatData.Items = parseShoppingList(chatData.Items, update.Message.Text)
+		var chatListData ChatListData
+		getValue(ctx, redisClient, generateChatKey(update.Message), &chatListData)
+		if !chatListData.Locked && chatListData.MessageID != 0 && chatListData.MessageThreadID == update.Message.MessageThreadID {
+			chatListData.Items = parseShoppingList(chatListData.Items, update.Message.Text)
 			b.DeleteMessage(ctx, &bot.DeleteMessageParams{
 				ChatID:    update.Message.Chat.ID,
 				MessageID: update.Message.ID,
 			})
-			drawShoppingList(ctx, b, update.Message.Chat.ID, update.Message.MessageThreadID, &chatData)
-			setValue(ctx, redisClient, strconv.Itoa(int(update.Message.Chat.ID)), chatData)
+			drawShoppingList(ctx, b, update.Message.Chat.ID, update.Message.MessageThreadID, &chatListData)
+			setValue(ctx, redisClient, generateChatKey(update.Message), chatListData)
 		}
 	}
 }
 
 func parseShoppingList(shoppingList []Item, message string) []Item {
-	lines := strings.Split(message, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(message, "\n") {
 		shoppingList = append(shoppingList, Item{
 			Name:   line,
-			Bought: false,
+			Enable: false,
 		})
 	}
 	return shoppingList

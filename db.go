@@ -55,5 +55,4 @@ func getValue(ctx context.Context, redisClient *redis.Client, key string, result
 	log.Printf("%s", result)
 
 	return true, nil
-
 }
