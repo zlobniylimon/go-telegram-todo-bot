@@ -20,15 +20,23 @@ func (m *RedisEmptyValue) Error() string {
 }
 
 func createRedisClient() *redis.Client {
-	db, _ := strconv.ParseInt(os.Getenv("REDIS_DB"), 10, 32)
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     os.Getenv("REDIS_ADDR"),
+	addr := getRequiredEnv("REDIS_ADDR")
+
+	db := 0
+	if raw := os.Getenv("REDIS_DB"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil {
+			log.Fatalf("invalid REDIS_DB %q: %v", raw, err)
+		}
+		db = int(parsed)
+	}
+
+	return redis.NewClient(&redis.Options{
+		Addr:     addr,
 		Username: os.Getenv("REDIS_USERNAME"),
 		Password: os.Getenv("REDIS_PASSWORD"),
-		DB:       int(db),
+		DB:       db,
 	})
-
-	return redisClient
 }
 
 func setValue(ctx context.Context, redisClient *redis.Client, key string, value interface{}) error {

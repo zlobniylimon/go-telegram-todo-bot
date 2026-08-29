@@ -28,6 +28,8 @@ type ChatListData struct {
 }
 
 func main() {
+	token := getRequiredEnv("TELEGRAM_BOT_TOKEN")
+
 	redisClient = createRedisClient()
 	defer redisClient.Close()
 
@@ -40,12 +42,20 @@ func main() {
 		bot.WithCallbackQueryDataHandler("btn_", bot.MatchTypePrefix, callbackHandler),
 	}
 
-	b, err := bot.New(os.Getenv("TELEGRAM_BOT_TOKEN"), opts...)
+	b, err := bot.New(token, opts...)
 	if nil != err {
 		panic(err)
 	}
 
 	b.Start(ctx)
+}
+
+func getRequiredEnv(name string) string {
+	value := os.Getenv(name)
+	if value == "" {
+		log.Fatalf("environment variable %s is required", name)
+	}
+	return value
 }
 
 func generateChatKey(message *models.Message) string {
