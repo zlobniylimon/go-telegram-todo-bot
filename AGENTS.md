@@ -27,7 +27,7 @@ Required env vars (set in `.env` or environment):
 | `REDIS_PASSWORD` | Redis auth password (optional) |
 | `REDIS_DB` | Redis DB number, default `0` |
 
-`example.env` exists but is missing `REDIS_ADDR` — needed for local (non-Docker) runs.
+`example.env` includes `REDIS_ADDR=localhost:6379` for local (non-Docker) runs.
 
 ## Security
 
@@ -41,6 +41,7 @@ Required env vars (set in `.env` or environment):
 - Bot listens via long-polling (`b.Start(ctx)`). Key handler: `/make_list` command creates an interactive inline-keyboard list; `defaultHandler` appends new items from any message when the list is unlocked.
 - State is per-chat-thread, keyed by `chatID:threadID` in Redis as JSON.
 - The `Locked` flag on `ChatListData` prevents new items from being added — toggled by an inline button.
+- Handlers run concurrently — `go-telegram/bot` spawns a goroutine per update (`process_update.go`). Per-chat-thread read-modify-write is serialized via the in-process keyed mutex `lockChat(key)` in `locks.go`, which relies on single-instance deployment (one `app` container). Horizontal scaling would require Redis WATCH/Lua instead.
 
 ## Testing
 
@@ -49,5 +50,5 @@ Tests cover only pure functions (`buttonText`, `lockedImage`, `parseShoppingList
 ## Gotchas
 
 - `parseShoppingList` splits on newlines; each line becomes a separate item.
-- `REDIS_ADDR` is set via `docker-compose.yml` override (`redis:6379`), not in `example.env` — local dev requires setting it manually.
+- `REDIS_ADDR` is set via `docker-compose.yml` override (`redis:6379`) in Docker, and now also present in `example.env` (`localhost:6379`) for local runs.
 - No generated code, no codegen, no migrations.

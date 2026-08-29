@@ -1,7 +1,9 @@
 package main
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-telegram/bot/models"
 )
@@ -276,4 +278,46 @@ func TestEnsureItemIDs_MixedLegacyAndExisting(t *testing.T) {
 	if data.NextItemID != 8 {
 		t.Errorf("expected NextItemID 8, got %d", data.NextItemID)
 	}
+}
+
+func TestLockChat_SameKeySerializes(t *testing.T) {
+	const goroutines = 50
+	const increments = 10
+	var counter int
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < increments; j++ {
+				unlock := lockChat("key")
+				counter++
+				unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	want := goroutines * increments
+	if counter != want {
+		t.Errorf("expected counter %d, got %d (lost updates)", want, counter)
+	}
+}
+
+func TestLockChat_DifferentKeysIndependent(t *testing.T) {
+	unlockA := lockChat("key_a")
+
+	acquired := make(chan struct{})
+	go func() {
+		unlock := lockChat("key_b")
+		close(acquired)
+		unlock()
+	}()
+
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("lock on key_b blocked by key_a: different keys must not contend")
+	}
+
+	unlockA()
 }

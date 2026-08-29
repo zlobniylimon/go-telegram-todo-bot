@@ -63,6 +63,8 @@ func generateChatKey(message *models.Message) string {
 }
 
 func makeListCommand(ctx context.Context, b *bot.Bot, update *models.Update) {
+	defer lockChat(generateChatKey(update.Message))()
+
 	message, err := b.SendMessage(ctx, &bot.SendMessageParams{
 		ChatID:          update.Message.Chat.ID,
 		MessageThreadID: update.Message.MessageThreadID,
@@ -92,6 +94,8 @@ func callbackHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	})
 
 	message := update.CallbackQuery.Message.Message
+	defer lockChat(generateChatKey(message))()
+
 	var chatListData ChatListData
 	getValue(ctx, redisClient, generateChatKey(message), &chatListData)
 	ensureItemIDs(&chatListData)
@@ -233,6 +237,8 @@ func defaultHandler(ctx context.Context, b *bot.Bot, update *models.Update) {
 	if update.Message == nil {
 		return
 	}
+
+	defer lockChat(generateChatKey(update.Message))()
 
 	var chatListData ChatListData
 	getValue(ctx, redisClient, generateChatKey(update.Message), &chatListData)
